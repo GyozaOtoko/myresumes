@@ -15,10 +15,30 @@ interface ResumeBody {
   content?: string
 }
 
+interface ResumeVariantDelegate {
+  findMany: (args?: Record<string, unknown>) => Promise<any[]>
+  create: (args: { data: Record<string, unknown> }) => Promise<any>
+  update: (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => Promise<any>
+}
+
+interface UserDelegate {
+  upsert: (args: {
+    where: Record<string, unknown>
+    update: Record<string, unknown>
+    create: Record<string, unknown>
+  }) => Promise<{ id: VariantId }>
+}
+
+const prismaDelegates = prisma as unknown as {
+  resumeVariant?: ResumeVariantDelegate
+  user?: UserDelegate
+}
+
 const DEFAULT_USER_EMAIL = 'default.user@myresumes.local'
 const DEFAULT_USER_NAME = 'Default User'
 const DEFAULT_VARIANT_NAME = 'Baseline Resume'
-const DEFAULT_VARIANT_CONTENT = `John Doe\nSenior Full-Stack Developer\n\nSummary\nExperienced engineer with a strong focus on Nuxt and TypeScript applications.\n\nExperience\n- Built scalable web platforms with modern frontend tooling.\n- Collaborated with product and design to deliver user-first features.`
+const PRISMA_RECORD_NOT_FOUND = 'P2025'
+const DEFAULT_VARIANT_CONTENT = `Sample Candidate\nSenior Full-Stack Developer\n\nSummary\nExperienced engineer with a strong focus on Nuxt and TypeScript applications.\n\nExperience\n- Built scalable web platforms with modern frontend tooling.\n- Collaborated with product and design to deliver user-first features.`
 
 const mapVariant = (variant: any): ResumeVariant => ({
   id: variant.id,
@@ -27,7 +47,7 @@ const mapVariant = (variant: any): ResumeVariant => ({
 })
 
 const ensureDefaultUserId = async (): Promise<VariantId | undefined> => {
-  const userDelegate = (prisma as any).user
+  const userDelegate = prismaDelegates.user
   if (!userDelegate?.upsert) {
     return undefined
   }
@@ -48,23 +68,47 @@ const ensureDefaultUserId = async (): Promise<VariantId | undefined> => {
   }
 }
 
+const findManyWithFallback = async (
+  resumeVariantDelegate: ResumeVariantDelegate,
+  attempts: Array<Record<string, unknown> | undefined>
+) => {
+  let lastError: unknown
+
+  for (const attempt of attempts) {
+    try {
+      return await resumeVariantDelegate.findMany(attempt)
+    } catch (error) {
+      lastError = error
+      // try the next fallback query
+    }
+  }
+
+  throw createError({
+    statusCode: 500,
+    statusMessage: `Failed to fetch resume variants. ${lastError instanceof Error ? lastError.message : ''}`.trim()
+  })
+}
+
 const findVariants = async (userId?: VariantId) => {
-  const resumeVariantDelegate = (prisma as any).resumeVariant
+  const resumeVariantDelegate = prismaDelegates.resumeVariant
   if (!resumeVariantDelegate?.findMany) {
     throw createError({ statusCode: 500, statusMessage: 'ResumeVariant model is not available.' })
   }
 
   if (typeof userId === 'undefined') {
-    return resumeVariantDelegate.findMany({ orderBy: { createdAt: 'asc' } }).catch(() => resumeVariantDelegate.findMany())
+    return findManyWithFallback(resumeVariantDelegate, [{ orderBy: { createdAt: 'asc' } }, undefined])
   }
 
-  return resumeVariantDelegate
-    .findMany({ where: { userId }, orderBy: { createdAt: 'asc' } })
-    .catch(() => resumeVariantDelegate.findMany({ orderBy: { createdAt: 'asc' } }).catch(() => resumeVariantDelegate.findMany()))
+  return findManyWithFallback(resumeVariantDelegate, [
+    { where: { userId }, orderBy: { createdAt: 'asc' } },
+    { where: { userId } },
+    { orderBy: { createdAt: 'asc' } },
+    undefined
+  ])
 }
 
 const createVariant = async (options: { userId?: VariantId; name: string; content: string }) => {
-  const resumeVariantDelegate = (prisma as any).resumeVariant
+  const resumeVariantDelegate = prismaDelegates.resumeVariant
   if (!resumeVariantDelegate?.create) {
     throw createError({ statusCode: 500, statusMessage: 'ResumeVariant model is not available.' })
   }
@@ -113,7 +157,7 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, statusMessage: 'A string content value is required.' })
       }
 
-      const resumeVariantDelegate = (prisma as any).resumeVariant
+      const resumeVariantDelegate = prismaDelegates.resumeVariant
       if (!resumeVariantDelegate) {
         throw createError({ statusCode: 500, statusMessage: 'ResumeVariant model is not available.' })
       }
@@ -122,17 +166,29 @@ export default defineEventHandler(async (event) => {
         const userId = await ensureDefaultUserId()
         const created = await createVariant({
           userId,
-          name: body.name?.trim() || `Variant ${Date.now()}`,
+          name: body.name?.trim() || DEFAULT_VARIANT_NAME,
           content: body.content
         })
 
         return mapVariant(created)
       }
 
-      const updated = await resumeVariantDelegate.update({
-        where: { id: body.id },
-        data: { content: body.content }
-      })
+      let updated
+      try {
+        updated = await resumeVariantDelegate.update({
+          where: { id: body.id },
+          data: { content: body.content }
+        })
+      } catch (updateError: any) {
+        if (
+          updateError?.code === PRISMA_RECORD_NOT_FOUND
+          || String(updateError?.message ?? '').toLowerCase().includes('record to update not found')
+        ) {
+          throw createError({ statusCode: 404, statusMessage: 'Resume variant not found.' })
+        }
+
+        throw updateError
+      }
 
       return mapVariant(updated)
     }

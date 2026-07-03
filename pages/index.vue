@@ -9,6 +9,8 @@ interface ResumeVariant {
   content: string
 }
 
+const VARIANT_SUFFIX_LENGTH = 4
+
 const selectedVariantId = ref<VariantId | null>(null)
 const editedContent = ref('')
 const originalContent = ref('')
@@ -58,10 +60,17 @@ const createVariant = async () => {
   saveSuccess.value = ''
 
   try {
+    const timestampLabel = new Date().toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+    const timestampSuffix = Date.now().toString(36).slice(-VARIANT_SUFFIX_LENGTH).toUpperCase()
     const created = await $fetch<ResumeVariant>('/api/resumes', {
       method: 'POST',
       body: {
-        name: `New Variant ${variants.value.length + 1}`,
+        name: `New Variant ${timestampLabel} ${timestampSuffix}`,
         content: ''
       }
     })
