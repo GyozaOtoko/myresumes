@@ -1,5 +1,5 @@
 import { createError, getMethod, readBody } from 'h3'
-import prisma from '../utils/prisma'
+import prisma, { ensurePrismaSchema } from '../utils/prisma'
 
 type VariantId = number | string
 
@@ -134,6 +134,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     if (method === 'GET') {
+      await ensurePrismaSchema()
       const userId = await ensureDefaultUserId()
       const variants = await findVariants(userId)
 
@@ -151,6 +152,7 @@ export default defineEventHandler(async (event) => {
     }
 
     if (method === 'POST') {
+      await ensurePrismaSchema()
       const body = await readBody<ResumeBody>(event)
 
       if (typeof body.content !== 'string') {
