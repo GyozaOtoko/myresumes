@@ -1,0 +1,29 @@
+{
+  "name": "myresumes",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "prepare": "nuxt prepare && prisma generate",
+    "typecheck": "nuxt typecheck",
+    "lint": "npm run typecheck",
+    "test": "npm run typecheck",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "diff": "^7.0.0",
+    "nuxt": "^3.12.4"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.1",
+    "@types/node": "^22.10.1",
+    "prisma": "^5.18.0",
+    "typescript": "^5.5.4",
+    "vue-tsc": "^2.0.29"
+  }
+}
